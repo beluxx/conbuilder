@@ -63,6 +63,9 @@ create:
 
     $ conbuilder create --codename wheezy
 
+    New base systems are created automatically by "build" if
+    needed.
+
 update:
     update base system using debootstrap
 
@@ -72,6 +75,10 @@ build:
     build package using dpkg-buildpackage
     Creates an overlay called L2 if not already available.
     Options after '--' will be passed to dpkg-buildpackage
+
+install:
+    install built package and its dependencies using "debi"
+    Creates a temporary overlay FS
 
 Default configuration:
 --
@@ -175,15 +182,17 @@ def load_conf_and_parse_args():
         help="Config file path (default: {})".format(default_conf_fn)
     )
     ap.add_argument('action', choices=[
-        'create', 'update', 'build', 'purge', 'show'
+        'create', 'update', 'build', 'install', 'purge', 'show'
     ])
     ap.add_argument('--codename', default='sid', help='codename (default: sid)')
     ap.add_argument('--verbose', '-v', action='count', default=0,
                     help='increase verbosity up to 3 times')
     ap.add_argument("extra_args", nargs="*")  # for dpkg-buildpackage
     args = ap.parse_args()
-    if args.extra_args and args.action != "build":
-        ap.error("Extra arguments should be passed only during build")
+    if args.extra_args:
+        if args.action not in ("build", "install"):
+            ap.error("Extra arguments should be passed only during build \
+                     or install")
 
     # generate default conf file if needed
     if args.conf == default_conf_fn and not os.path.isfile(args.conf):
@@ -224,7 +233,7 @@ def update_l1(conf, l1dir):
     # TODO invalidate L2s
     print("Updating", l1dir)
     nspawn("-D {} -- /usr/bin/apt-get -y update".format(l1dir))
-    nspawn("-D {} -- /usr/bin/apt-get -y dist-upgrade".format(l1dir))
+    nspawn("-D {} -E DEBIAN_FRONTEND=noninteractive -- /usr/bin/apt-get -y dist-upgrade".format(l1dir))
 
 
 def create_l2(conf, l1dir, l2dir, l2workdir, l2mountdir, expected_deps):
@@ -242,7 +251,7 @@ def create_l2(conf, l1dir, l2dir, l2workdir, l2mountdir, expected_deps):
         if conf.verbose == 0:
             print("[L2]", " ".join(deps_list))
 
-        cmd = "-D {} --overlay=$(pwd)::/srv  -- /usr/bin/apt-get build-dep -y ."
+        cmd = "-D {} -E DEBIAN_FRONTEND=noninteractive --overlay=$(pwd)::/srv  -- /usr/bin/apt-get build-dep -y ."
         cmd = cmd.format(l2mountdir)
         out = nspawn(cmd, quiet=(conf.verbose == 0))
         _parse_build_deps(out)
@@ -324,6 +333,40 @@ def build(conf):
         print("\n[Success] Output is at {}".format(l3dir))
 
 
+def install(conf):
+    """Create temporary layer, install package and deps
+    """
+    # L1: base system
+    l1dir = os.path.join(conf.cachedir, "l1", conf.codename)
+    if not os.path.exists(l1dir):
+        create_l1(conf, l1dir)
+
+    # L2t: install
+    dep_hash = "foo"
+    l2dir = os.path.join(conf.cachedir, "l2i", "fs", dep_hash)
+    l2workdir = os.path.join(conf.cachedir, "l2i", "overlay_work", dep_hash)
+    l2mountdir = os.path.join(conf.cachedir, "l2i", "overlay_mount", dep_hash)
+
+    print("[L2i] Creating", l2dir)
+    if not os.path.exists(l2dir):
+        os.makedirs(l2dir)
+        os.makedirs(l2workdir)
+        os.makedirs(l2mountdir)
+    try:
+        mount(l1dir, l2dir, l2workdir, l2mountdir)
+        print("[L2] Ready")
+
+        deb_fnames = conf.extra_args
+        for fn in deb_fnames:
+            cmd = "sudo cp -a {} {}/srv/".format(fn, l2mountdir)
+            run(cmd)
+        cmd = "-D {} -- /usr/bin/apt install -y /srv/safeeyes_2.0.0-2_all.deb"
+        cmd = "-D {} -- /bin/bash"
+        cmd = cmd.format(l2mountdir)
+        nspawn(cmd)
+
+    finally:
+        umount(l2mountdir)
 
 
 def show(conf):
@@ -365,6 +408,9 @@ def main():
 
     if conf.action == 'build':
         build(conf)
+
+    elif conf.action == 'install':
+        install(conf)
 
     elif conf.action == 'purge':
         # TODO
