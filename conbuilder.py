@@ -85,7 +85,9 @@ Default configuration:
 {conf}
 --
 
-""".format(conf=default_conf)
+""".format(
+    conf=default_conf
+)
 
 
 def run(cmd, quietcmd=False, quiet=False):
@@ -113,8 +115,7 @@ def run(cmd, quietcmd=False, quiet=False):
 
 
 def mount(lower, upper, work, mnt):
-    cmd = "sudo mount -t overlay overlay " \
-        "-olowerdir={},upperdir={},workdir={} {}"
+    cmd = "sudo mount -t overlay overlay " "-olowerdir={},upperdir={},workdir={} {}"
     cmd = cmd.format(lower, upper, work, mnt)
     run(cmd)
     assert os.path.isfile(os.path.join(mnt, "usr/bin/apt"))
@@ -124,7 +125,7 @@ def umount(path):
     run("sudo umount {}".format(path))
 
 
-def nspawn(rcmd, quiet=False, drop_capability='', system_call_filter=''):
+def nspawn(rcmd, quiet=False, drop_capability="", system_call_filter=""):
     assert isinstance(rcmd, str)
     cmd = "sudo systemd-nspawn -M conbuilder --chdir=/srv "
     if drop_capability:
@@ -143,8 +144,8 @@ def _parse_build_deps(out):
         if not line.startswith("Inst "):
             continue
         # Example: Inst gettext (0.19.8.1-4 Debian:unstable [amd64]) []
-        _, pkgname, version, _1 = line.split(' ', 3)
-        assert version.startswith('('), "Cannot parse version from %r" % line
+        _, pkgname, version, _1 = line.split(" ", 3)
+        assert version.startswith("("), "Cannot parse version from %r" % line
         version = version[1:]
         assert version, "Cannot parse version from %r" % line
         deps.add((pkgname, version))
@@ -171,45 +172,51 @@ def extract_build_dependencies(l1dir):
 
 
 def load_conf_and_parse_args():
-    confighome = os.path.expanduser(
-        os.environ.get('XDG_CONFIG_HOME', '~/.config'))
-    default_conf_fn = os.path.join(confighome, 'conbuilder.conf')
+    confighome = os.path.expanduser(os.environ.get("XDG_CONFIG_HOME", "~/.config"))
+    default_conf_fn = os.path.join(confighome, "conbuilder.conf")
 
-    ap = ArgumentParser(epilog=help_msg,
-                        formatter_class=RawDescriptionHelpFormatter)
+    ap = ArgumentParser(epilog=help_msg, formatter_class=RawDescriptionHelpFormatter)
     ap.add_argument(
-        '--conf', default=default_conf_fn,
-        help="Config file path (default: {})".format(default_conf_fn)
+        "--conf",
+        default=default_conf_fn,
+        help="Config file path (default: {})".format(default_conf_fn),
     )
-    ap.add_argument('action', choices=[
-        'create', 'update', 'build', 'install', 'purge', 'show'
-    ])
-    ap.add_argument('--codename', default='sid', help='codename (default: sid)')
-    ap.add_argument('--verbose', '-v', action='count', default=0,
-                    help='increase verbosity up to 3 times')
+    ap.add_argument(
+        "action", choices=["create", "update", "build", "install", "purge", "show"]
+    )
+    ap.add_argument("--codename", default="sid", help="codename (default: sid)")
+    ap.add_argument(
+        "--verbose",
+        "-v",
+        action="count",
+        default=0,
+        help="increase verbosity up to 3 times",
+    )
     ap.add_argument("extra_args", nargs="*")  # for dpkg-buildpackage
     args = ap.parse_args()
     if args.extra_args:
         if args.action not in ("build", "install"):
-            ap.error("Extra arguments should be passed only during build \
-                     or install")
+            ap.error(
+                "Extra arguments should be passed only during build \
+                     or install"
+            )
 
     # generate default conf file if needed
     if args.conf == default_conf_fn and not os.path.isfile(args.conf):
         print("Configuration file not found. Generating {}".format(args.conf))
-        with open(args.conf, 'w') as f:
+        with open(args.conf, "w") as f:
             f.write(default_conf)
 
     cp = ConfigParser()
     with open(args.conf) as f:
         cp.read_file(f)
-    args.cachedir = cp['DEFAULT']['cachedir']
-    assert args.cachedir not in ('', '/'), "Invalid cache dir"
-    args.export_dir = cp['DEFAULT']['export_dir']
+    args.cachedir = cp["DEFAULT"]["cachedir"]
+    assert args.cachedir not in ("", "/"), "Invalid cache dir"
+    args.export_dir = cp["DEFAULT"]["export_dir"]
 
-    drop_capability = cp['DEFAULT'].get('drop_capability', '')
-    args.drop_capability = drop_capability.strip().replace(', ', ',')
-    args.system_call_filter = cp['DEFAULT'].get('system_call_filter', '')
+    drop_capability = cp["DEFAULT"].get("drop_capability", "")
+    args.drop_capability = drop_capability.strip().replace(", ", ",")
+    args.system_call_filter = cp["DEFAULT"].get("system_call_filter", "")
     return args
 
 
@@ -218,13 +225,16 @@ def create_l1(conf, l1dir):
     """
     print("Creating", l1dir)
     os.makedirs(l1dir)
-    cmd = "sudo debootstrap --include=apt --keyring=/etc/apt/trusted.gpg" \
+    cmd = (
+        "sudo debootstrap --include=apt --keyring=/etc/apt/trusted.gpg"
         " --force-check-gpg {} {} http://httpredir.debian.org/debian"
+    )
     cmd = cmd.format(conf.codename, l1dir)
     run(cmd)
     assert os.path.isfile(os.path.join(l1dir, "usr/bin/apt"))
-    assert os.path.isdir(os.path.join(l1dir, "etc")), \
-        "/etc not found in {} ".format(l1dir)
+    assert os.path.isdir(os.path.join(l1dir, "etc")), "/etc not found in {} ".format(
+        l1dir
+    )
 
 
 def update_l1(conf, l1dir):
@@ -233,7 +243,11 @@ def update_l1(conf, l1dir):
     # TODO invalidate L2s
     print("Updating", l1dir)
     nspawn("-D {} -- /usr/bin/apt-get -y update".format(l1dir))
-    nspawn("-D {} -E DEBIAN_FRONTEND=noninteractive -- /usr/bin/apt-get -y dist-upgrade".format(l1dir))
+    nspawn(
+        "-D {} -E DEBIAN_FRONTEND=noninteractive -- /usr/bin/apt-get -y dist-upgrade".format(
+            l1dir
+        )
+    )
 
 
 def create_l2(conf, l1dir, l2dir, l2workdir, l2mountdir, expected_deps):
@@ -256,7 +270,7 @@ def create_l2(conf, l1dir, l2dir, l2workdir, l2mountdir, expected_deps):
         out = nspawn(cmd, quiet=(conf.verbose == 0))
         _parse_build_deps(out)
         cmd = "-D {} --overlay=$(pwd)::/srv  -- /usr/bin/apt-get clean"
-        with open(os.path.join(l2mountdir, '.deps.conbuilder'), 'w') as f:
+        with open(os.path.join(l2mountdir, ".deps.conbuilder"), "w") as f:
             f.write("\n".join(deps_list))
 
     finally:
@@ -291,8 +305,7 @@ def build(conf):
 
         l3dir = os.path.join(conf.cachedir, "l3", "fs", dep_hash)
         l3workdir = os.path.join(conf.cachedir, "l3", "overlay_work", dep_hash)
-        l3mountdir = os.path.join(conf.cachedir, "l3", "overlay_mount",
-                                  dep_hash)
+        l3mountdir = os.path.join(conf.cachedir, "l3", "overlay_mount", dep_hash)
         if not os.path.exists(l3dir):
             print("[L3] Creating", l3dir)
             os.makedirs(l3dir)
@@ -307,7 +320,7 @@ def build(conf):
             nspawn(
                 cmd,
                 drop_capability=conf.drop_capability,
-                system_call_filter=conf.system_call_filter
+                system_call_filter=conf.system_call_filter,
             )
             success = True
 
@@ -377,14 +390,13 @@ def show(conf):
     run("machinectl list | grep conbuilder | cat", quietcmd=True)
 
     print("Layers:")
-    for nick, path in (('L1', 'l1'), ('L2', 'l2/fs'), ('L3', 'l3/fs')):
+    for nick, path in (("L1", "l1"), ("L2", "l2/fs"), ("L3", "l3/fs")):
         print("  {}:".format(nick))
         for item in os.scandir(os.path.join(conf.cachedir, path)):
-            size = run("sudo du -hs {}".format(item.path),
-                       quietcmd=True, quiet=True)
-            size = size[0].split('\t')[0]
+            size = run("sudo du -hs {}".format(item.path), quietcmd=True, quiet=True)
+            size = size[0].split("\t")[0]
             print("    {:35} {}".format(item.name, size))
-            deps_fn = os.path.join(item.path, '.deps.conbuilder')
+            deps_fn = os.path.join(item.path, ".deps.conbuilder")
             if not os.path.isfile(deps_fn):
                 continue
             with open(deps_fn) as f:
@@ -398,28 +410,27 @@ def show(conf):
 def main():
     conf = load_conf_and_parse_args()
 
-    if conf.action == 'create':
+    if conf.action == "create":
         l1dir = os.path.join(conf.cachedir, "l1", conf.codename)
         create_l1(conf, l1dir)
 
-    elif conf.action == 'update':
+    elif conf.action == "update":
         l1dir = os.path.join(conf.cachedir, "l1", conf.codename)
         update_l1(conf, l1dir)
 
-    if conf.action == 'build':
+    if conf.action == "build":
         build(conf)
 
-    elif conf.action == 'install':
+    elif conf.action == "install":
         install(conf)
 
-    elif conf.action == 'purge':
+    elif conf.action == "purge":
         # TODO
         raise NotImplementedError
 
-    elif conf.action == 'show':
+    elif conf.action == "show":
         show(conf)
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
