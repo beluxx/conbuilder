@@ -42,6 +42,12 @@ l2_max_age_days = 30
 
 # *also* purge older layers 2 if there are more than:
 l2_max_number = 10
+
+# colors - ANSI escape codes 38;2;⟨r⟩;⟨g⟩;⟨b⟩
+# color_info = "38;2;0;98;149"
+# color_error = "38;2;200;0;0"
+# color_success = "38;2;0;200;0"
+
 """
 
 help_msg = """
@@ -91,12 +97,27 @@ Default configuration:
 )
 
 
+colors = None
+
+
+def info(*a):
+    s = " ".join(a)
+    c = colors["info"]
+    print("\x1b[{}m{}\x1b[0m".format(c, s))
+
+
+def error(*a):
+    s = " ".join(a)
+    c = colors["error"]
+    print("\033[{}m{}\033[0m".format(c, s))
+
+
 def run(cmd: str, quietcmd=False, quiet=False) -> list:
     """Run command, capture output
     """
     assert isinstance(cmd, str), repr(cmd)
     if not quietcmd:
-        print(cmd)
+        info(cmd)
     proc = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
     out = []
     while True:
@@ -106,14 +127,14 @@ def run(cmd: str, quietcmd=False, quiet=False) -> list:
         line = line.rstrip().decode()
         out.append(line)
         if not quiet:
-            print(line)
+            info(line)
 
     proc.wait()
     if proc.returncode != 0:
-        print("-- Error --")
+        error("-- Error --")
         err = proc.stderr.read().decode()
-        print(err)
-        print("-----------")
+        error(err)
+        error("-----------")
         raise Exception("'{}' returned {}".format(cmd, proc.returncode))
 
     return out
@@ -206,7 +227,7 @@ def load_conf_and_parse_args():
 
     # generate default conf file if needed
     if args.conf == default_conf_fn and not os.path.isfile(args.conf):
-        print("Configuration file not found. Generating {}".format(args.conf))
+        info("Configuration file not found. Generating {}".format(args.conf))
         with open(args.conf, "w") as f:
             f.write(default_conf)
 
@@ -220,6 +241,9 @@ def load_conf_and_parse_args():
     drop_capability = cp["DEFAULT"].get("drop_capability", "")
     args.drop_capability = drop_capability.strip().replace(", ", ",")
     args.system_call_filter = cp["DEFAULT"].get("system_call_filter", "")
+    args.color_info = cp["DEFAULT"].get("color_info", "38;2;0;98;149")
+    args.color_error = cp["DEFAULT"].get("color_error", "38;2;200;0;0")
+    args.color_success = cp["DEFAULT"].get("color_success", "38;2;0;200;0")
     return args
 
 
@@ -227,9 +251,9 @@ def create_l1(conf, l1dir: Path):
     """Run debootstrap to create the L1 FS
     """
     if l1dir.exists():
-        print("Error: the base filesystem (L1) already exists")
+        error("Error: the base filesystem (L1) already exists")
         sys.exit(1)
-    print("Creating", l1dir)
+    info("Creating", l1dir)
     l1dir.mkdir(parents=True)
     cmd = (
         "sudo debootstrap --include=apt "
@@ -245,7 +269,7 @@ def update_l1(conf, l1dir):
     """Update the L1 FS
     """
     # TODO invalidate L2s
-    print("Updating", l1dir)
+    info(f"Updating {l1dir}")
     nspawn("-D {} -- /usr/bin/apt-get -y update".format(l1dir))
     nspawn(
         "-D {} -E DEBIAN_FRONTEND=noninteractive -- /usr/bin/apt-get -y dist-upgrade".format(
@@ -257,7 +281,7 @@ def update_l1(conf, l1dir):
 def create_l2(conf, l1dir, l2dir, l2workdir, l2mountdir, expected_deps):
     """Run apt-get build-deps in the L2 FS to install dependencies
     """
-    print("[L2] Creating", l2dir)
+    info("[L2] Creating", l2dir)
     os.makedirs(l2dir)
     os.makedirs(l2workdir)
     os.makedirs(l2mountdir)
@@ -265,9 +289,9 @@ def create_l2(conf, l1dir, l2dir, l2workdir, l2mountdir, expected_deps):
         mount(l1dir, l2dir, l2workdir, l2mountdir)
 
         deps_list = ["{}:{}".format(name, ver) for name, ver in expected_deps]
-        print("[L2] Installing dependencies...")
+        info("[L2] Installing dependencies...")
         if conf.verbose == 0:
-            print("[L2]", " ".join(deps_list))
+            info("[L2]", " ".join(deps_list))
 
         cmd = "-D {} -E DEBIAN_FRONTEND=noninteractive --overlay=$(pwd)::/srv  -- /usr/bin/apt-get build-dep -y ."
         cmd = cmd.format(l2mountdir)
@@ -298,20 +322,20 @@ def build(conf):
     l2dir = conf.cachedir / "l2" / "fs" / dep_hash
     l2workdir = conf.cachedir / "l2" / "overlay_work" / dep_hash
     l2mountdir = conf.cachedir / "l2" / "overlay_mount" / dep_hash
-    print("[L1] Ready")
+    info("[L1] Ready")
 
     if not os.path.exists(l2dir):
         create_l2(conf, l1dir, l2dir, l2workdir, l2mountdir, deps)
 
     try:
         mount(l1dir, l2dir, l2workdir, l2mountdir)
-        print("[L2] Ready")
+        info("[L2] Ready")
 
         l3dir = conf.cachedir / "l3" / "fs" / dep_hash
         l3workdir = conf.cachedir / "l3" / "overlay_work" / dep_hash
         l3mountdir = conf.cachedir / "l3" / "overlay_mount" / dep_hash
         if not os.path.exists(l3dir):
-            print("[L3] Creating", l3dir)
+            info("[L3] Creating", l3dir)
             os.makedirs(l3dir)
             os.makedirs(l3workdir)
             os.makedirs(l3mountdir)
@@ -344,10 +368,10 @@ def build(conf):
             cmd = "cp -a {}/*.{} {}/ || true".format(l3dir, e, dest)
             run(cmd)
 
-        print("\n[Success]")
+        info("\n[Success]")
 
     else:
-        print("\n[Success] Output is at {}".format(l3dir))
+        info("\n[Success] Output is at {}".format(l3dir))
 
 
 def install(conf):
@@ -364,13 +388,13 @@ def install(conf):
     l2workdir = conf.cachedir / "l2i" / "overlay_work" / dep_hash
     l2mountdir = conf.cachedir / "l2i" / "overlay_mount" / dep_hash
 
-    print("[L2i] Creating", l2dir)
+    info("[L2i] Creating", l2dir)
     for d in (l2dir, l2workdir, l2mountdir):
         d.mkdir(parents=True, exist_ok=True)
 
     try:
         mount(l1dir, l2dir, l2workdir, l2mountdir)
-        print("[L2] Ready")
+        info("[L2] Ready")
 
         deb_fnames = conf.extra_args
         for fn in deb_fnames:
@@ -386,35 +410,39 @@ def install(conf):
 
 
 def show(conf):
-    print("Mounted overlays:")
+    info("Mounted overlays:")
     run("mount | grep ^overlay | cat", quietcmd=True)
 
-    print("Running containers:")
+    info("Running containers:")
     run("machinectl list | grep conbuilder | cat", quietcmd=True)
 
-    print("Layers:")
+    info("Layers:")
     for nick, path in (("L1", "l1"), ("L2", "l2/fs"), ("L3", "l3/fs")):
-        print("  {}:".format(nick))
+        info("  {}:".format(nick))
         d = conf.cachedir / path
         if not d.exists():
             continue
         for item in d.iterdir():
             size = run("sudo du -hs {}".format(item), quietcmd=True, quiet=True)
             size = size[0].split("\t")[0]
-            print("    {:35} {}".format(item.name, size))
+            info("    {:35} {}".format(item.name, size))
             deps_fn = item / ".deps.conbuilder"
             if not deps_fn.is_file():
                 continue
             with deps_fn.open() as f:
                 for line in f:
-                    print("     ", line.rstrip())
+                    info("     ", line.rstrip())
             # TODO add age
-            print()
-        print()
+            info("")
+        info("")
 
 
 def main():
+    global colors
     conf = load_conf_and_parse_args()
+    colors = dict(
+        info=conf.color_info, error=conf.color_error, success=conf.color_success
+    )
 
     if conf.action == "create":
         l1dir = conf.cachedir / "l1" / conf.codename
